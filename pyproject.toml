@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Python module for running Defense Predictor, a machine learning model to predict antiphage defense systems"
 authors = ["peterdeweirdt <petedeweirdt@gmail.com>"]
 readme = "README.md"
+license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.10"
