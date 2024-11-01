@@ -26,6 +26,6 @@ jobs:
       - name: Install dependencies
         run: poetry install
       - name: Debug
-        run: poetry run python tests/degug.py
+        run: poetry run python tests/debug.py
       - name: Run tests
         run: poetry run pytest
