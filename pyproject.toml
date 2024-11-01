@@ -1,13 +1,22 @@
 [tool.poetry]
 name = "defense-predictor"
 version = "0.1.0"
-description = ""
+description = "Python module for running Defense Predictor, a machine learning model to predict antiphage defense systems"
 authors = ["peterdeweirdt <petedeweirdt@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = "^3.10"
+fair-esm = "^2.0.0"
+joblib = "^1.4.2"
+numpy = "^2.1.2"
+pandas = "^2.2.3"
+lightgbm = "^4.5.0"
+scikit-learn = "^1.5.2"
 
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
 
 [build-system]
 requires = ["poetry-core"]
