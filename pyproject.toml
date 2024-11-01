@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "defense-predictor"
+version = "0.1.0"
+description = ""
+authors = ["peterdeweirdt <petedeweirdt@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
