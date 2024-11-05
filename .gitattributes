@@ -1,2 +1,8 @@
 tests/data/GCF_003333385_X.csv filter=lfs diff=lfs merge=lfs -text
 tests/data/GCF_003333385_beaker_predictions.csv filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_11042024.faa filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_11042024.ffn filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_11042024.gff filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_ASM333338v1_cds_from_genomic.fna filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_ASM333338v1_feature_table.txt filter=lfs diff=lfs merge=lfs -text
+tests/data/GCF_003333385.1_ASM333338v1_protein.faa filter=lfs diff=lfs merge=lfs -text
