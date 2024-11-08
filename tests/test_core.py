@@ -51,7 +51,7 @@ def test_run_defense_predictor(true_y_df):
     data_top_dir = Path(__file__).parent / 'data'
     ncbi_feature_table = data_top_dir / 'GCF_003333385.1_ASM333338v1_feature_table.txt'
     ncbi_cds_from_genomic = data_top_dir / 'GCF_003333385.1_ASM333338v1_cds_from_genomic.fna'
-    ncbi_protein_fasta=None = data_top_dir / 'GCF_003333385.1_ASM333338v1_protein.faa'
+    ncbi_protein_fasta = data_top_dir / 'GCF_003333385.1_ASM333338v1_protein.faa'
     output_df = run_defense_predictor(ncbi_feature_table=ncbi_feature_table,  
                                       ncbi_cds_from_genomic=ncbi_cds_from_genomic,
                                       ncbi_protein_fasta=ncbi_protein_fasta)
