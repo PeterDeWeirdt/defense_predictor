@@ -32,8 +32,9 @@ def parse_ncbi_cds_from_genomic(cds_from_genomic_f):
     out_df['strand'] = ['-' if x else '+' for x in 
                         out_df['location'].str.contains('complement')]
     out_df['start'] = out_df['location'].str.extract('([0-9]+)\.\.').astype(int)
+    out_df['end'] = out_df['location'].str.extract('\.\.([0-9]+)').astype(int)
     out_df['genomic_accession'] = out_df['id'].str.extract('lcl\|(.+)_cds')
-    out_df = out_df[['genomic_accession', 'start', 'strand', 'dna_seq']]
+    out_df = out_df[['genomic_accession', 'start', 'end', 'strand', 'dna_seq']]
     return out_df
                 
 
@@ -65,7 +66,7 @@ def get_ncbi_seq_info(ncbi_feature_table, ncbi_cds_from_genomic, ncbi_protein_fa
     cds_from_genomic_df = parse_ncbi_cds_from_genomic(ncbi_cds_from_genomic)
     protein_fasta_df = parse_ncbi_protein_fasta(ncbi_protein_fasta)
     seq_info_df = (seq_info_df
-                   .merge(cds_from_genomic_df, on=['genomic_accession', 'start', 'strand'], how='inner')
+                   .merge(cds_from_genomic_df, on=['genomic_accession', 'start', 'end', 'strand'], how='inner')
                    .merge(protein_fasta_df, on='product_accession', how='inner'))
     seq_info_df['protein_context_id'] = (seq_info_df['product_accession'] + '|' +
                                          seq_info_df['genomic_accession'] + '|' + 
