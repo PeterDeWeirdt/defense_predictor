@@ -8,6 +8,8 @@ from pathlib import Path
 from esm import pretrained, FastaBatchedDataset
 from tqdm import tqdm
 import warnings
+import argparse
+from datetime import datetime
 
 
 def parse_ncbi_cds_from_genomic(cds_from_genomic_f):
@@ -377,4 +379,31 @@ def run_defense_predictor(ncbi_feature_table=None,  ncbi_cds_from_genomic=None, 
         out_df = (seq_info_df.merge(prediction_df, left_on='protein_context_id', right_index=True))
     return out_df
     
-    
+
+def main():
+    parser = argparse.ArgumentParser(description='Run defense predictor')
+    parser.add_argument('--ncbi_feature_table', type=str, help='Path to NCBI feature table')
+    parser.add_argument('--ncbi_cds_from_genomic', type=str, help='Path to NCBI CDS from genomic file')
+    parser.add_argument('--ncbi_protein_fasta', type=str, help='Path to NCBI protein FASTA file')
+    parser.add_argument('--prokka_gff', type=str, help='Path to Prokka GFF file')
+    parser.add_argument('--prokka_ffn', type=str, help='Path to Prokka FFN file')
+    parser.add_argument('--prokka_faa', type=str, help='Path to Prokka FAA file')
+    parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], help='Device to run the predictor on')
+    parser.add_argument('--output', type=str, help='Filepath for csv output file')
+    args = parser.parse_args()
+    out_df = run_defense_predictor(ncbi_feature_table=args.ncbi_feature_table, 
+                          ncbi_cds_from_genomic=args.ncbi_cds_from_genomic, 
+                          ncbi_protein_fasta=args.ncbi_protein_fasta, 
+                          prokka_gff=args.prokka_gff, 
+                          prokka_ffn=args.prokka_ffn, 
+                          prokka_faa=args.prokka_faa, 
+                          device=args.device)
+    if args.output is None:
+        output = 'defense_predictions' + datetime.now().strftime('%Y%m%d%H%M%S') + '.csv'
+    else:
+        output = args.output
+    out_df.to_csv(output, index=False)
+
+
+if __name__ == '__main__':
+    main()
