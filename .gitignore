@@ -1,3 +1,4 @@
 __pycache__/
 .DS_Store
 GCF_000005845.2*
+dist/
