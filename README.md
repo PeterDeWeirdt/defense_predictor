@@ -7,16 +7,16 @@ Python package to run DefensePredictor, a machine-learning model that leverages 
 In a fresh [conda](https://anaconda.org/anaconda/conda) or other virutal environment, run
 
 ```bash
-pip install defense_predictor
+pip install git+https://github.com/PeterDeWeirdt/defense_predictor.git
 ```
 
 ### Requirements 
 
 Requires `python >= 3.10`
 
-### Example usage
+### Usage
 
-DefensePredictor can be run as python code
+`defense_predictor` can be run as python code
 
 ```python
 import defense_predictor as dfp
@@ -40,7 +40,13 @@ defense_predictor \
      --output GCF_003333385_defense_predictor_output.csv
 ```
 
-We reccomend running defense_predictor on a computer with a cuda-enabled GPU, to maximize computational efficiency. 
+<br>
+
+`defense_predictor` outputs the predicted probability and log-odds of defense for each input protein. We reccomend using a stringent log-odds cutoff of `7.2` to call a protein predicted defensive.
+
+To see an example you can run the `defense_predictor_example.ipynb` in colab: <a href="https://colab.research.google.com/github/PeterDeWeirdt/defense_predictor/blob/main/defense_predictor_example.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> 
+
+We reccomend running `defense_predictor` on a computer with a cuda-enabled GPU, to maximize computational efficiency. 
 
 ### Inputs
 
