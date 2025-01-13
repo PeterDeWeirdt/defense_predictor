@@ -4,11 +4,14 @@ Python package to run DefensePredictor, a machine-learning model that leverages 
 
 ### Installation
 
-In a fresh [conda](https://anaconda.org/anaconda/conda) or other virutal environment, run
+In a fresh [conda](https://anaconda.org/anaconda/conda) or other virutal environment, run:
 
 ```bash
-pip install git+https://github.com/PeterDeWeirdt/defense_predictor.git
+pip install defense_predictor
+defense_predictor_download
 ```
+
+The first command downloads the python package and the second command downloads the model weights. Once model weights are downloaded you do not need to run this command again. 
 
 ### Requirements 
 
