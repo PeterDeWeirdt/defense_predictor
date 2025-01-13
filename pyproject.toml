@@ -16,6 +16,7 @@ lightgbm = "^4.5.0"
 scikit-learn = "^1.5.2"
 torch = "^2.5.1"
 tqdm = "^4.67.0"
+requests = "^2.32.3"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -27,3 +28,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 defense_predictor = "defense_predictor.core:main"
+defense_predictor_download = "defense_predictor.downloads:main"

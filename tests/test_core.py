@@ -1,8 +1,13 @@
 import pytest
 from pathlib import Path
 import pandas as pd
-from defense_predictor import load_model, predict, get_ncbi_seq_info, get_prokka_seq_info, run_defense_predictor
+from defense_predictor import load_model, predict, get_ncbi_seq_info, get_prokka_seq_info, run_defense_predictor, download_weights
 import numpy as np
+
+
+@pytest.fixture(scope='session', autouse=True)
+def download_weights_fixture():
+    download_weights()
 
 
 @pytest.fixture

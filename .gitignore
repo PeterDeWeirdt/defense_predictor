@@ -2,3 +2,6 @@ __pycache__/
 .DS_Store
 GCF_000005845.2*
 dist/
+beaker_v3.pkl
+esm2_t30_150M_UR50D-contact-regression.pt
+esm2_t30_150M_UR50D.pt

@@ -338,6 +338,9 @@ def predict(data):
 def run_defense_predictor(ncbi_feature_table=None,  ncbi_cds_from_genomic=None, ncbi_protein_fasta=None, 
                           prokka_gff=None, prokka_ffn=None, prokka_faa=None, 
                           device=None):
+    for f in ['beaker_v3.pkl', 'esm2_t30_150M_UR50D.pt', 'esm2_t30_150M_UR50D-contact-regression.pt']:
+        if not Path(__file__).parent.joinpath(f).exists():
+            raise FileNotFoundError(f)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  
         print("Reading data")
