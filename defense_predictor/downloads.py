@@ -12,7 +12,7 @@ def download_model_weights():
         with open(gz_path, "wb") as f:
             shutil.copyfileobj(r.raw, f)
     with gzip.open(gz_path, 'rb') as gz_file:
-        with gzip.open(os.path.join(os.path.dirname(__file__), "beaker_v3.pkl"), 'wb') as out_file:
+        with open(os.path.join(os.path.dirname(__file__), "beaker_v3.pkl"), 'wb') as out_file:
             shutil.copyfileobj(gz_file, out_file)
     os.remove(gz_path)
 
@@ -25,7 +25,7 @@ def download_esm2_contact_weights():
         with open(gz_path, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
     with gzip.open(gz_path, 'rb') as gz_file:
-        with gzip.open(os.path.join(os.path.dirname(__file__), 'esm2_t30_150M_UR50D-contact-regression.pt'), 'wb') as out_file:
+        with open(os.path.join(os.path.dirname(__file__), 'esm2_t30_150M_UR50D-contact-regression.pt'), 'wb') as out_file:
             shutil.copyfileobj(gz_file, out_file)
     os.remove(gz_path)
 
@@ -39,7 +39,7 @@ def download_esm2_weights():
             shutil.copyfileobj(r.raw, f)
 
 
-def main():
+def download_weights():
     base_dir = os.path.dirname(__file__)
     downloaded_weights = os.listdir(base_dir)
     if "beaker_v3.pkl" not in downloaded_weights:
@@ -53,5 +53,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    download_weights()
     
