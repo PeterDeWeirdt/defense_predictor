@@ -39,7 +39,7 @@ def download_esm2_weights():
             shutil.copyfileobj(r.raw, f)
 
 
-def download_weights():
+def main():
     base_dir = os.path.dirname(__file__)
     downloaded_weights = os.listdir(base_dir)
     if "beaker_v3.pkl" not in downloaded_weights:
@@ -53,5 +53,5 @@ def download_weights():
 
 
 if __name__ == "__main__":
-    download_weights()
+    main()
     
