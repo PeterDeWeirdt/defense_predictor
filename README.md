@@ -11,7 +11,7 @@ pip install defense_predictor
 defense_predictor_download
 ```
 
-The first command downloads the python package and the second command downloads the model weights. Once model weights are downloaded you do not need to run this command again. 
+The first command downloads the python package from PyPI and the second downloads the model weights. Once model weights are downloaded you do not need to run this command again. 
 
 ### Requirements 
 
