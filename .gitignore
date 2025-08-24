@@ -5,3 +5,5 @@ dist/
 beaker_v3.pkl
 esm2_t30_150M_UR50D-contact-regression.pt
 esm2_t30_150M_UR50D.pt
+.vscode
+.pytest_cache

@@ -5,7 +5,7 @@ import gzip
 
 
 def download_model_weights():
-    url = "https://www.dropbox.com/scl/fi/qzaorf3uo1zyt7aarxzyh/beaker_v3.pkl.gz?rlkey=f3ntc1plms3yr0qf3v7e50ftt&st=i7xbmhyq&dl=1"
+    url = "https://zenodo.org/records/16937977/files/beaker_v3.pkl.gz?download=1"
     gz_path = os.path.join(os.path.dirname(__file__), "beaker_v3.pkl.gz")
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
@@ -18,7 +18,7 @@ def download_model_weights():
 
 
 def download_esm2_contact_weights():
-    url = 'https://www.dropbox.com/scl/fi/fooq2okgre1twc4lb2ea2/esm2_t30_150M_UR50D-contact-regression.pt.gz?rlkey=lfol53rbwwq0yff52l9mc8tkc&st=oaf7qen1&dl=1'
+    url = 'https://zenodo.org/records/16937977/files/esm2_t30_150M_UR50D-contact-regression.pt.gz?download=1'
     gz_path = os.path.join(os.path.dirname(__file__), 'esm2_t30_150M_UR50D-contact-regression.pt.gz')
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
