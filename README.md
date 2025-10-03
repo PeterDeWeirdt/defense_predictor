@@ -27,9 +27,7 @@ import defense_predictor as dfp
 ncbi_feature_table = 'GCF_003333385.1_ASM333338v1_feature_table.txt'
 ncbi_cds_from_genomic = 'GCF_003333385.1_ASM333338v1_cds_from_genomic.fna'
 ncbi_protein_fasta = 'GCF_003333385.1_ASM333338v1_protein.faa'
-output_df = dfp.defense_predictor(ft_file=ncbi_feature_table,  
-                                  fna_file=ncbi_cds_from_genomic,
-                                  faa_file=ncbi_protein_fasta)
+output_df, feature_matrix = dfp.defense_predictor(ft_file=ncbi_feature_table, fna_file=ncbi_cds_from_genomic, faa_file=ncbi_protein_fasta)
 output_df.head()                                    
 ```
 
