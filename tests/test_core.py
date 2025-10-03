@@ -22,7 +22,7 @@ def test_defense_predictor(reference_predictions):
     ncbi_feature_table = data_top_dir / 'GCF_000005845.2_ASM584v2_feature_table.txt'
     ncbi_cds_from_genomic = data_top_dir / 'GCF_000005845.2_ASM584v2_cds_from_genomic.fna'
     ncbi_protein_fasta = data_top_dir / 'GCF_000005845.2_ASM584v2_protein.faa'
-    output_df = defense_predictor(ft_file=ncbi_feature_table,  
+    output_df, _ = defense_predictor(ft_file=ncbi_feature_table,  
                                   fna_file=ncbi_cds_from_genomic,
                                   faa_file=ncbi_protein_fasta)
     merged_df = output_df.merge(reference_predictions[['protein_context_id', 'mean_log_odds']], 
