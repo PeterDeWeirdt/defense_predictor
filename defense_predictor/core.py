@@ -1,386 +1,333 @@
-from importlib import resources
-from joblib import load
 import pandas as pd
-import numpy as np
-import re
-import torch
-from pathlib import Path
 from esm import pretrained, FastaBatchedDataset
+import torch
 from tqdm import tqdm
-import warnings
+import re
+from joblib import load
+import os
+import numpy as np
 import argparse
-from datetime import datetime
+import datetime
+from importlib import resources
+from pathlib import Path
+import warnings
 
 
-def parse_ncbi_cds_from_genomic(cds_from_genomic_f):
-    with open(cds_from_genomic_f) as f:
-        out_dict = None
-        out_list = list()
-        for line in f:
-            if line.startswith('>'):
-                if out_dict is not None:
-                    out_list.append(out_dict)
-                out_dict = {'dna_seq': ''}
-                out_dict['id'] = line.split()[0][1:]
-                attributes = re.findall('\[([^=]+)=([^=]+)\]', line)
-                for k, v in attributes:
-                    out_dict[k] = v
-            else:
-                out_dict['dna_seq'] += line.strip()
-        out_list.append(out_dict)
-    out_df = pd.DataFrame(out_list)
-    if 'pseudo' in out_df.columns:
-        out_df = out_df[out_df['pseudo'].isna()]
-    out_df['strand'] = ['-' if x else '+' for x in 
-                        out_df['location'].str.contains('complement')]
-    out_df['start'] = out_df['location'].str.extract('([0-9]+)\.\.').astype(int)
-    out_df['genomic_accession'] = out_df['id'].str.extract('lcl\|(.+)_cds')
-    out_df = out_df[['genomic_accession', 'start', 'protein_id', 'strand', 'dna_seq']].rename(columns={'protein_id': 'product_accession'})
-    return out_df
-                
-
-def parse_ncbi_protein_fasta(protein_fasta_f):
-    with open(protein_fasta_f) as f:
-        out_dict = None
-        out_list = list()
-        for line in f:
-            if line.startswith('>'):
-                if out_dict is not None:
-                    out_list.append(out_dict)
-                product_accession = line.split()[0][1:]
-                out_dict = {'product_accession': product_accession, 'protein_seq': ''}
-            else:
-                out_dict['protein_seq'] += line.strip()
-        out_list.append(out_dict)
-    out_df = pd.DataFrame(out_list)
-    return out_df
-
-                
-def get_ncbi_seq_info(ncbi_feature_table, ncbi_cds_from_genomic, ncbi_protein_fasta):
-    seq_info_df = pd.read_table(ncbi_feature_table)
-    seq_info_df['attributes'] = seq_info_df['attributes'].astype(str)
-    seq_info_df = (seq_info_df[(seq_info_df['# feature'] == 'CDS') & 
-                                ~seq_info_df['attributes'].str.contains('pseudo', na=False)]
-                                .reset_index(drop=True))
-    seq_info_df['start'] = seq_info_df['start'].astype(int)
-    seq_info_df['end'] = seq_info_df['end'].astype(int)
-    cds_from_genomic_df = parse_ncbi_cds_from_genomic(ncbi_cds_from_genomic)
-    protein_fasta_df = parse_ncbi_protein_fasta(ncbi_protein_fasta)
-    seq_info_df = (seq_info_df
-                   .merge(cds_from_genomic_df, on=['genomic_accession', 'start', 'product_accession', 'strand'], how='inner')
-                   .merge(protein_fasta_df, on='product_accession', how='inner'))
-    seq_info_df['protein_context_id'] = (seq_info_df['product_accession'] + '|' +
-                                         seq_info_df['genomic_accession'] + '|' + 
-                                         seq_info_df['start'].astype(str) + '|' + 
-                                         seq_info_df['strand'])
-    seq_info_df = seq_info_df[['protein_context_id', 'product_accession', 'name', 'symbol',
-                               'genomic_accession', 'start', 'end', 'strand', 
-                               'dna_seq', 'protein_seq']]  
-    return seq_info_df
+def get_feature_df(ft_file):
+    feature_df = pd.read_table(ft_file)
+    feature_df['attributes'] = feature_df['attributes'].astype(str)
+    filtered_feature_df = (feature_df[(feature_df['# feature'] == 'CDS') &
+                                      ~(feature_df['attributes'].str.contains('pseudo', na=False))]
+                           .reset_index(drop=True))
+    filtered_feature_df['protein_context_id'] = (filtered_feature_df['product_accession'].astype(str) + '|' +
+                                                 filtered_feature_df['genomic_accession'].astype(str) + '|' +
+                                                 filtered_feature_df['start'].astype(str) + '|' +
+                                                 filtered_feature_df['strand'])
+    return filtered_feature_df
 
 
-def parse_prokka_gff(gff_f):
-    gff_list = list()
-    with open(gff_f) as f:
-        for line in f:
-            if line.startswith('##FASTA'):
-                break
-            elif not line.startswith('#'):
-                gff_list.append(line.strip().split('\t'))
-    gff_df = pd.DataFrame(gff_list,
-                          columns=['genomic_accession', 'source', 'type', 'start', 
-                                   'end', 'score', 'strand', 'phase', 'attributes'])
-    attributes_list = list()
-    for attr in gff_df['attributes']:
-        attributes_list.append(dict([x.split('=') for x in attr.split(';')]))
-    attributes_df = pd.DataFrame(attributes_list)
-    gff_df = pd.concat([gff_df, attributes_df], axis=1).drop('attributes', axis=1)
-    return gff_df
+def get_neighbor_df(feature_df):
+    n_neighbors = 2
+    protein_neighbor_list = list()
+    for i, center_row in tqdm(feature_df.iterrows(),
+                              total=len(feature_df), 
+                              position=0):
+        center_id = center_row['protein_context_id']
+        center_genomic_accession = center_row['genomic_accession']
+        center_strand = center_row['strand']
+        protein_neighbor_df = feature_df.iloc[max(i - n_neighbors, 0):(i + n_neighbors + 1), :]
+        protein_neighbor_df = protein_neighbor_df[protein_neighbor_df['genomic_accession'] == center_genomic_accession]
+        protein_neighbor_out = (protein_neighbor_df[['product_accession', 'protein_context_id', 'strand', 'start', 'end']].reset_index()
+                                .rename(columns={'index': 'relative_position'}))
+        protein_neighbor_out['relative_position'] = protein_neighbor_out['relative_position'] - i
+        protein_neighbor_out['center_strand'] = center_strand
+        if center_strand == '-':
+            protein_neighbor_out['relative_position'] = -protein_neighbor_out['relative_position']
+        protein_neighbor_out['center_id'] = center_id
+        protein_neighbor_list.append(protein_neighbor_out)
+    protein_neighbor_df = pd.concat(protein_neighbor_list)
+    return protein_neighbor_df
 
 
-def parse_prokka_ffn(ffn_f):
-    with open(ffn_f) as f:
-        out_dict = None
-        out_list = list()
-        for line in f:
-            if line.startswith('>'):
-                if out_dict is not None:
-                    out_list.append(out_dict)
-                out_dict = {'dna_seq': ''}
-                out_dict['ID'] = line.split()[0][1:]
-            else:
-                out_dict['dna_seq'] += line.strip()
-        out_list.append(out_dict)
-    out_df = pd.DataFrame(out_list)
-    return out_df
-
-
-def parse_prokka_faa(faa_f):
-    with open(faa_f) as f:
-        out_dict = None
-        out_list = list()
-        for line in f:
-            if line.startswith('>'):
-                if out_dict is not None:
-                    out_list.append(out_dict)
-                out_dict = {'ID': line.split()[0][1:], 'protein_seq': ''}
-            else:
-                out_dict['protein_seq'] += line.strip()
-        out_list.append(out_dict)
-    out_df = pd.DataFrame(out_list)
-    return out_df
-
-
-def get_prokka_seq_info(prokka_gff, prokka_ffn, prokka_faa):
-    seq_info_df = parse_prokka_gff(prokka_gff)
-    seq_info_df = (seq_info_df[seq_info_df['type'] == 'CDS']
-                   .reset_index(drop=True))
-    seq_info_df['start'] = seq_info_df['start'].astype(int)
-    seq_info_df['end'] = seq_info_df['end'].astype(int)
-    ffn_df = parse_prokka_ffn(prokka_ffn)
-    faa_df = parse_prokka_faa(prokka_faa)
-    seq_info_df = (seq_info_df.merge(ffn_df, on='ID', how='inner')
-                   .merge(faa_df, on='ID', how='inner'))
-    seq_info_df = seq_info_df.rename(columns={'ID': 'product_accession', 
-                                              'product': 'name',
-                                              'gene': 'symbol'})
-    seq_info_df['protein_context_id'] = (seq_info_df['product_accession'] + '|' +
-                                         seq_info_df['genomic_accession'] + '|' +
-                                         seq_info_df['start'].astype(str) + '|' +
-                                         seq_info_df['strand'])
-    seq_info_df = seq_info_df[['protein_context_id', 'product_accession', 'name', 'symbol',
-                               'genomic_accession', 'start', 'end', 'strand',
-                               'dna_seq', 'protein_seq']]
-    return seq_info_df
-
-
-def get_esm2_encodings(seq_info_df, device, 
-                       toks_per_batch=4096, truncation_seq_len=1022, 
-                       repr_layer=30, model_location='esm2_t30_150M_UR50D.pt'):
-    # load model
+def get_representations(faa_file):
+    model_location = 'esm2_t30_150M_UR50D.pt'
     model_path = str(Path(__file__).parent / model_location)
+    toks_per_batch = 4096
+    truncation_seq_length = 1022
+    repr_layer = 30
     model, alphabet = pretrained.load_model_and_alphabet(model_path)
-    device = torch.device(device)
-    model = model.to(device)
-    # prepare data
-    unique_seq_df = seq_info_df[['protein_seq']].drop_duplicates()
-    dataset = FastaBatchedDataset(unique_seq_df['protein_seq'], unique_seq_df['protein_seq'])
+    if torch.cuda.is_available():
+        model = model.cuda()
+        print("Transferred model to GPU")
+    assert (-(model.num_layers + 1) <= repr_layer <= model.num_layers)
+    repr_layer = (repr_layer + model.num_layers + 1) % (model.num_layers + 1)
+    print('repr layer', repr_layer)
+    dataset = FastaBatchedDataset.from_file(faa_file)
     batches = dataset.get_batch_indices(toks_per_batch, extra_toks_per_seq=1)
-    data_loader = torch.utils.data.DataLoader(dataset, 
-                                              collate_fn=alphabet.get_batch_converter(truncation_seq_len), 
-                                              batch_sampler=batches)
-    n_feats = 640
-    feat_names = ['ft' + str(i + 1) for i in range(n_feats)]
-    esm2_encoding_list = list()
+    data_loader = torch.utils.data.DataLoader(
+        dataset, collate_fn=alphabet.get_batch_converter(truncation_seq_length), batch_sampler=batches
+    )
+    rep_list = list()
+    label_list = list()
     with torch.no_grad():
-        for batch_idx, (labels, strs, toks) in tqdm(enumerate(data_loader), 
-                                                    total=len(batches), position=0):
-            toks = toks.to(device, non_blocking=True)
+        for batch_idx, (labels, strs, toks) in tqdm(enumerate(data_loader),
+                                                    total=len(batches), 
+                                                    position=0):
+            if torch.cuda.is_available():
+                toks = toks.to(device='cuda', non_blocking=True)
             out = model(toks, repr_layers=[repr_layer], return_contacts=False)
             representations = out['representations'][repr_layer]
             for i, label in enumerate(labels):
-                truncate_len = min(truncation_seq_len, len(strs[i]))
-                mean_rep = representations[i, 1:truncate_len+1].mean(0).cpu().numpy()
-                esm2_encoding_list.append(pd.Series(mean_rep, index=feat_names, name=label))
-    esm2_encoding_df = pd.DataFrame(esm2_encoding_list)
-    return esm2_encoding_df
+                truncate_len = min(truncation_seq_length, len(strs[i]))
+                mean_rep = representations[i, 1:truncate_len + 1].mean(0).cpu().numpy()
+                label_list.append(label.split(' ')[0])
+                rep_list.append(mean_rep)
+    rep_df = pd.DataFrame(rep_list)
+    rep_df.columns = ['ft' + str(i+1) for i in range(rep_df.shape[1])]
+    rep_df.index = label_list
+    return rep_df
 
 
-def test_get_esm2_encodings(seq_fasta, device, 
-                       toks_per_batch=4096, truncation_seq_len=1022, 
-                       repr_layer=30, model_location='esm2_t30_150M_UR50D.pt'):
-    # load model
-    model_path = str(Path(__file__).parent / model_location)
-    model, alphabet = pretrained.load_model_and_alphabet(model_path)
-    device = torch.device(device)
-    model = model.to(device)
-    # prepare data
-    dataset = FastaBatchedDataset.from_file(seq_fasta)
-    batches = dataset.get_batch_indices(toks_per_batch, extra_toks_per_seq=1)
-    data_loader = torch.utils.data.DataLoader(dataset, 
-                                              collate_fn=alphabet.get_batch_converter(truncation_seq_len), 
-                                              batch_sampler=batches)
-    n_feats = 640
-    feat_names = ['ft' + str(i + 1) for i in range(n_feats)]
-    esm2_encoding_list = list()
-    with torch.no_grad():
-        for batch_idx, (labels, strs, toks) in tqdm(enumerate(data_loader), 
-                                                    total=len(batches), position=0):
-            toks = toks.to(device, non_blocking=True)
-            out = model(toks, repr_layers=[repr_layer], return_contacts=False)
-            representations = out['representations'][repr_layer]
-            for i, label in enumerate(labels):
-                truncate_len = min(truncation_seq_len, len(strs[i]))
-                mean_rep = representations[i, 1:truncate_len+1].mean(0).cpu().numpy()
-                esm2_encoding_list.append(pd.Series(mean_rep, index=feat_names, name=label))
-            break
-    esm2_encoding_df = pd.DataFrame(esm2_encoding_list)
-    return esm2_encoding_df
-
-
-def get_dna_features(seq_info_df):
-    out_df = seq_info_df[['protein_context_id', 'dna_seq', 'start', 'end']].copy()
-    # Note: length was originally calculated from the cds_from_genomic fasta, so length of sequences with ribosomal slippage are shorter in training data
-    out_df['len'] = out_df['end'] - out_df['start']
-    out_df['seq_len'] = out_df['dna_seq'].str.len()
-    out_df['gc_frac'] = out_df['dna_seq'].str.count('G|C')/out_df['seq_len'] 
+def get_motifs(fna_file):
     nts = ['A', 'C', 'T', 'G']
     di_nts = []
     for n1 in nts:
         for n2 in nts:
             di_nts.append(n1 + n2)
     motifs = nts + di_nts
-    frac_cols = ['gc_frac']
+    seq = ''
+    seq_list = []
+    seq_info = dict()
+    for line in open(fna_file):
+        line = line.strip()
+        if '>' in line:
+            if seq:
+                seq_info['seq'] = seq
+                seq_list.append(seq_info)
+                seq_info = dict()
+                seq = ''
+            seq_info['id'] = line.split(' ')[0][1:]
+            regex = '\[([^=]+)=([^=]+)\]'
+            attributes = re.findall(regex, line)
+            for key, value in attributes:
+                seq_info[key] = value
+        else:
+            seq += line
+    seq_info['seq'] = seq
+    seq_list.append(seq_info)
+    seq_df = pd.DataFrame(seq_list)
+    if 'pseudo' in seq_df.columns:
+        filtered_seq_df = seq_df[seq_df['pseudo'].isna()].copy()
+    else:
+        filtered_seq_df = seq_df
+    filtered_seq_df['strand'] = ['-' if x else '+' for x in 
+                                 filtered_seq_df['location'].str.contains('complement')]
+    filtered_seq_df['start'] = (filtered_seq_df['location']
+                                .str.extract('([0-9]+)\.\.').astype(int))
+    filtered_seq_df['genomic_locus'] = filtered_seq_df['id'].str.extract('lcl\|(.+)_cds')
+    filtered_seq_df['protein_context_id'] = (filtered_seq_df['protein_id'] + '|' + 
+                                           filtered_seq_df['genomic_locus'] + '|' +
+                                           filtered_seq_df['start'].astype(str) + '|' +
+                                           filtered_seq_df['strand'])
+    filtered_seq_df = filtered_seq_df.drop(columns=['strand', 'start', 'genomic_locus', 'protein_id'])
+    filtered_seq_df['gc_frac'] = (filtered_seq_df['seq'].str.count('G|C')/
+                                  filtered_seq_df['seq'].str.len())
+    filtered_seq_df['scaled_gc_frac'] = ((filtered_seq_df['gc_frac'] - 
+                                          filtered_seq_df['gc_frac'].mean())/
+                                         filtered_seq_df['gc_frac'].std())
+    out_cols = ['protein_context_id', 'scaled_gc_frac']
     for motif in motifs:
-        col_name = motif + '_frac'
-        frac_cols.append(col_name)
-        out_df[col_name] = out_df['dna_seq'].str.count(motif)/out_df['seq_len']
-    out_cols = ['protein_context_id', 'len']
-    for feat in frac_cols:
-        scaled_col = 'scaled_' + feat
-        out_cols.append(scaled_col)
-        out_df[scaled_col] = (out_df[feat] - out_df[feat].mean())/out_df[feat].std()
-    out_df = out_df[out_cols]
+        col = motif + '_frac'
+        filtered_seq_df[col] = (filtered_seq_df['seq'].str.count(motif)/
+                                filtered_seq_df['seq'].str.len())
+    for motif in motifs:
+        col = 'scaled_' + motif + '_frac'
+        unscaled_col = motif + '_frac'
+        filtered_seq_df[col] = ((filtered_seq_df[unscaled_col] - 
+                                 filtered_seq_df[unscaled_col].mean())/
+                                filtered_seq_df[unscaled_col].std())
+        out_cols.append(col)
+    filtered_seq_df = filtered_seq_df[out_cols]
+    return filtered_seq_df
+
+
+def parse_fasta(fasta_file):
+    """
+    Parses a FASTA file using only base Python and returns a list of dictionaries.
+    Args:
+        fasta_file (str): The path to the FASTA file.
+    Returns:
+        list: A list of dictionaries, where each dictionary represents a
+              sequence record with 'id' and 'sequence' keys. Returns an
+              empty list if the file is not found or is empty.
+    """
+    records = []
+    current_id = None
+    current_sequence_parts = []
+    try:
+        with open(fasta_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue  # Skip empty lines
+                if line.startswith('>'):
+                    # If we have a previous sequence, save it
+                    if current_id is not None:
+                        sequence = "".join(current_sequence_parts)
+                        records.append({'id': current_id, 'sequence': sequence})
+                    # Start a new record
+                    # The ID is the string after '>' and before the first space
+                    current_id = line[1:].split()[0]
+                    current_sequence_parts = []
+                else:
+                    # Append sequence line to the current record
+                    if current_id is not None:
+                        current_sequence_parts.append(line)
+            # After the loop, save the very last record in the file
+            if current_id is not None:
+                sequence = "".join(current_sequence_parts)
+                records.append({'id': current_id, 'sequence': sequence})
+    except FileNotFoundError:
+        print(f"Error: The file '{fasta_file}' was not found.")
+        return [] # Return an empty list on error
+    except Exception as e:
+        print(f"An error occurred while parsing the file: {e}")
+        return []
+    records_df = pd.DataFrame(records)
+    return records_df
+
+
+def get_seq_len(fasta_file):
+    seq_df = parse_fasta(fasta_file)
+    seq_df['len'] = seq_df['sequence'].str.len()
+    seq_df = (seq_df.rename(columns={'id': 'product_accession'})
+              .drop(columns='sequence')
+              .drop_duplicates())
+    return seq_df
+
+
+def get_directionality(neighbor_df):
+    out_df = neighbor_df.copy()
+    out_df['co_directional'] = (out_df['strand'] == out_df['center_strand']).astype(int)
+    out_df = out_df[['protein_context_id', 'center_id', 'co_directional']]
     return out_df
 
 
-def get_gene_neighbors(seq_info_df, n_neighbors=2):
-    sorted_seq_info = seq_info_df.sort_values(['genomic_accession', 'start']).reset_index(drop=True)
-    gene_neighbors_list = list()
-    for i, center_row in sorted_seq_info.iterrows():
-        center_id = center_row['protein_context_id']
-        center_genomic_accession = center_row['genomic_accession']
-        center_strand = center_row['strand']
-        gene_neighbor_df = sorted_seq_info.iloc[max(i - n_neighbors, 0):(i + n_neighbors + 1), :]
-        gene_neighbor_df = gene_neighbor_df[gene_neighbor_df['genomic_accession'] == center_genomic_accession]
-        gene_neighbor_out = (gene_neighbor_df[['product_accession', 'protein_context_id']].reset_index()
-                                .rename(columns={'index': 'relative_position'}))
-        gene_neighbor_out['relative_position'] = gene_neighbor_out['relative_position'] - i
-        if center_strand == '-':
-            gene_neighbor_out['relative_position'] = -gene_neighbor_out['relative_position']
-        gene_neighbor_out['center_id'] = center_id
-        gene_neighbors_list.append(gene_neighbor_out)
-    gene_neighbors_df = pd.concat(gene_neighbors_list)
-    return gene_neighbors_df
-
-
-def get_protein_dist(center_seq_id, context_df):
+def get_gene_dist(center_seq_id, context_df):
+    center_strand = context_df.loc[(context_df['relative_position'] == 0), 'strand'].item()
+    if center_strand == '+':
+        context_df = context_df.sort_values('relative_position', ascending=True)
+    else:
+        context_df = context_df.sort_values('relative_position', ascending=False)
+    curr_end = context_df['end']
+    next_start = context_df['start'].shift(-1)
+    if (context_df['end'] < context_df['start']).any():
+        context_df['wraparound'] = context_df['end'] < context_df['start']
+        next_wraparound = context_df['wraparound'].shift(-1)
+        distances = np.where(next_wraparound, 
+                             -curr_end,
+                             next_start - curr_end)
+    else:
+        distances = next_start - curr_end
+    distances = list(distances)
     out_dict = {'center_id': center_seq_id}
-    context_df = (context_df.sort_values('start', ascending=True)
-                  [['protein_context_id', 'start', 'end', 'relative_position']]
-                  .dropna()
-                  .reset_index(drop=True))
-    if len(context_df):
-        prev_end = context_df.loc[0, 'end']
-        prev_pos = context_df.loc[0, 'relative_position']
-        for _, row in context_df.iloc[1:, :].iterrows():
-            curr_start = row['start']
-            curr_pos = row['relative_position']
-            if abs(curr_pos - prev_pos) != 1: # missing value
-                break
-            sep = curr_start - prev_end
-            pos_key = ':'.join([str(x) for x in sorted([curr_pos, prev_pos])])
-            out_dict['dist_' + pos_key] = sep
-            prev_end =  row['end']
-            prev_pos = row['relative_position']
+    relative_positions = context_df['relative_position'].to_list()
+    for i in range(len(context_df) - 1):
+        pos_i = relative_positions[i]
+        pos_j = relative_positions[i+1]
+        out_dict['dist_' + 
+                 ':'.join([str(min(pos_i, pos_j)), 
+                           str(max(pos_i, pos_j))])] = distances[i]
     return out_dict
 
 
-def get_neighbor_features(gene_neighbor_df, seq_info_df):
-    gene_neighbor_info = gene_neighbor_df.merge(seq_info_df, on=['protein_context_id', 'product_accession'], how='inner')
-    co_directional_list = list()
-    dist_list = list()
-    for center_id, center_group in gene_neighbor_info.groupby('center_id'):
-        center_group = center_group.sort_values('start')
-        center_row = center_group[center_group['protein_context_id'] == center_id].squeeze()
-        center_strand = center_row['strand']
-        center_group['co_directional'] = (center_group['strand'] == center_strand).astype(int)
-        co_directional_list.append(center_group)
-        dist_dict = get_protein_dist(center_id, center_group)
-        dist_list.append(dist_dict)
-    co_directional_df = pd.concat(co_directional_list)
-    wide_co_directional_df = co_directional_df.pivot(index='center_id', columns='relative_position', values=['co_directional'])
-    wide_co_directional_df.columns = ['_'.join([str(y) for y in x]) for x in wide_co_directional_df.columns.to_flat_index()]
-    dist_df = pd.DataFrame(dist_list).set_index('center_id')
-    merged_neighbor_features = wide_co_directional_df.merge(dist_df, left_index=True, right_index=True, how='outer')
-    return merged_neighbor_features
+def get_distances(neighbor_df):
+    distance_list = [get_gene_dist(center_seq_id, context_df) 
+                     for center_seq_id, context_df in tqdm(neighbor_df.groupby('center_id'),
+                                                           position=0)]
+    distance_df = pd.DataFrame(distance_list)
+    distance_df = distance_df.set_index('center_id')
+    return distance_df
 
 
-def fill_missing_features(feature_df):
-    fill_values = {'len': 869, 'dist': 70, 'co_directional': 2}
-    for feature_base, fill_value in fill_values.items():
-        fill_cols = [x for x in feature_df.columns if feature_base in x]
-        feature_df[fill_cols] = feature_df[fill_cols].fillna(fill_value)
-    feature_df = feature_df.fillna(0)
-    return feature_df
-
-
-def reoder_feature_columns(feature_df):
-    columns = pd.read_csv(Path(__file__).parent / 'x_columns.csv')['0']
-    feature_df = feature_df[columns]
-    return feature_df
-
-
-def load_model():
-    with resources.files('defense_predictor').joinpath('beaker_v3.pkl').open('rb') as f:
+def load_model(model_f):
+    with resources.files('defense_predictor').joinpath(model_f).open('rb') as f:
         return load(f)
-
-
-def predict(data):
-    model = load_model()
-    probs = model.predict_proba(data)[:, 1]
-    output_df = pd.DataFrame(index=data.index)
-    output_df['defense_probability'] = probs
-    output_df['defense_log_odds'] = np.log(probs / (1 - probs))
-    return output_df
-
-
-def run_defense_predictor(ncbi_feature_table=None,  ncbi_cds_from_genomic=None, ncbi_protein_fasta=None, 
-                          prokka_gff=None, prokka_ffn=None, prokka_faa=None, 
-                          device=None):
-    for f in ['beaker_v3.pkl', 'esm2_t30_150M_UR50D.pt', 'esm2_t30_150M_UR50D-contact-regression.pt']:
+    
+    
+def defense_predictor(ft_file, fna_file, faa_file, rep_df=None, model_feature_df=None):
+    model_fs = ['beaker_fold_0.pkl', 'beaker_fold_1.pkl', 'beaker_fold_2.pkl', 
+                'beaker_fold_3.pkl', 'beaker_fold_4.pkl']
+    for f in model_fs + ['esm2_t30_150M_UR50D.pt', 'esm2_t30_150M_UR50D-contact-regression.pt']:
         if not Path(__file__).parent.joinpath(f).exists():
             raise FileNotFoundError(f)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")  
-        print("Reading data")
-        if (ncbi_feature_table is not None) or (ncbi_cds_from_genomic is not None) or (ncbi_protein_fasta is not None):
-            for f in [ncbi_feature_table, ncbi_cds_from_genomic, ncbi_protein_fasta]:
-                if f is None:
-                    raise ValueError('ncbi_feature_table, ncbi_cds_from_genomic, and ncbi_protein_fasta are required if input_type is ncbi')
-            seq_info_df = get_ncbi_seq_info(ncbi_feature_table, ncbi_cds_from_genomic, ncbi_protein_fasta)
-        elif (prokka_gff is not None) or (prokka_ffn is not None) or (prokka_faa is not None):
-            for f in [prokka_gff, prokka_ffn, prokka_faa]:
-                if f is None:
-                    raise ValueError('prokka_gff, prokka_ffn, and prokka_faa are required if input_type is prokka')
-            seq_info_df = get_prokka_seq_info(prokka_gff, prokka_ffn, prokka_faa)
-        print("Getting ESM2 encodings")
-        if device is None:
-            if torch.cuda.is_available():
-                device = 'cuda'
-            else:
-                device = 'cpu'
-        esm2_encodings = get_esm2_encodings(seq_info_df, device)
-        print("Calculating remaining features")
-        dna_feature_df = get_dna_features(seq_info_df)
-        self_feature_df = (seq_info_df[['protein_context_id', 'protein_seq']]
-                        .merge(esm2_encodings, left_on='protein_seq', right_index=True)
-                        .drop(columns='protein_seq')
-                        .merge(dna_feature_df, how='inner', on='protein_context_id'))
-        gene_neighbor_df = get_gene_neighbors(seq_info_df)
-        gene_neighbor_feature_df = (gene_neighbor_df.merge(self_feature_df, on='protein_context_id', how='inner'))
-        feature_df = gene_neighbor_feature_df.pivot(index='center_id',
-                                                    columns='relative_position',
-                                                    values=self_feature_df.columns[1:])
-        feature_df.columns = ['_'.join([str(y) for y in x]) for x in feature_df.columns.to_flat_index()]
-        neighbor_features = get_neighbor_features(gene_neighbor_df, seq_info_df)
-        feature_df = feature_df.merge(neighbor_features, how='inner', left_index=True, right_index=True)
-        feature_df = fill_missing_features(feature_df)
-        feature_df = reoder_feature_columns(feature_df)
-        print('Making predictions')
-        prediction_df = predict(feature_df)
-        out_df = (seq_info_df.merge(prediction_df, left_on='protein_context_id', right_index=True))
-    return out_df
+    feature_df = get_feature_df(ft_file)
+    if model_feature_df is None:
+        print('Getting neighbors')
+        neighbor_df = get_neighbor_df(feature_df)
+        # Rep df
+        if rep_df is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                print('Getting representations')
+                rep_df = get_representations(faa_file)
+        wide_rep_df = (neighbor_df[['product_accession', 'center_id', 'relative_position']]
+                       .set_index('product_accession')
+                       .merge(rep_df, how='left', left_index=True, right_index=True)
+                       .pivot(index='center_id', columns='relative_position'))
+        wide_rep_df = wide_rep_df.fillna(0)
+        wide_rep_df.columns = [x[0] + '_' + str(x[1]) for x in wide_rep_df.columns]
+        # NT df
+        nt_df = get_motifs(fna_file)
+        wide_nt_df = (neighbor_df[['protein_context_id', 'center_id', 'relative_position']]
+                      .merge(nt_df, how='left', on='protein_context_id')
+                      .drop(columns='protein_context_id')
+                      .pivot(index='center_id', columns='relative_position'))
+        wide_nt_df = wide_nt_df.fillna(1.1)
+        wide_nt_df.columns = [x[0] + '_' + str(x[1]) for x in wide_nt_df.columns]
+        # Len df
+        len_df = get_seq_len(faa_file)
+        wide_len_df = (neighbor_df[['product_accession', 'center_id', 'relative_position']]
+                       .merge(len_df, how='left', on='product_accession')
+                       .drop(columns='product_accession')
+                       .pivot(index='center_id', columns='relative_position'))
+        wide_len_df = wide_len_df.fillna(0)
+        wide_len_df.columns = [x[0] + '_' + str(x[1]) for x in wide_len_df.columns]
+        # Directionality df
+        directionality_df = get_directionality(neighbor_df)
+        wide_directionality_df = (neighbor_df[['protein_context_id', 'center_id', 'relative_position']]
+                                  .merge(directionality_df, how='left', on=['protein_context_id', 'center_id'])
+                                  .drop(columns='protein_context_id')
+                                  .pivot(index='center_id', columns='relative_position'))
+        wide_directionality_df = wide_directionality_df.fillna(2)
+        wide_directionality_df.columns = [x[0] + '_' + str(x[1]) for x in wide_directionality_df.columns]
+        # Distance df
+        print('Calculating distances')
+        distance_df = get_distances(neighbor_df)
+        distance_df = distance_df.fillna(-200)
+        model_feature_df = wide_rep_df
+        for df in [wide_nt_df, wide_len_df, wide_directionality_df, distance_df]:
+            model_feature_df = (model_feature_df.merge(df, left_index=True, right_index=True, how='inner'))
+    model_feature_mat = model_feature_df.to_numpy()
+    print('Making predictions')
+    pred_list = list()
+    for model_f in tqdm(model_fs, position=0):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = load_model(model_f)
+            prob = model.predict_proba(model_feature_mat, num_iteration=model.best_iteration_)[:, 1]
+        log_odds = np.log(prob/(1-prob))
+        pred_list.append(log_odds)
+    cat_preds = np.stack(pred_list)
+    out_df = (model_feature_df.reset_index()
+              .rename(columns={'center_id': 'protein_context_id'})
+              [['protein_context_id']]).copy()
+    out_df['mean_log_odds'] = cat_preds.mean(axis=0)
+    out_df['sd_log_odds'] = cat_preds.std(axis=0)
+    out_df['min_log_odds'] = cat_preds.min(axis=0)
+    out_df['max_log_odds'] = cat_preds.max(axis=0)
+    out_df = (out_df.merge(feature_df, how='inner', on='protein_context_id'))
+    return out_df, model_feature_df
     
 
 def main():
@@ -388,21 +335,13 @@ def main():
     parser.add_argument('--ncbi_feature_table', type=str, help='Path to NCBI feature table')
     parser.add_argument('--ncbi_cds_from_genomic', type=str, help='Path to NCBI CDS from genomic file')
     parser.add_argument('--ncbi_protein_fasta', type=str, help='Path to NCBI protein FASTA file')
-    parser.add_argument('--prokka_gff', type=str, help='Path to Prokka GFF file')
-    parser.add_argument('--prokka_ffn', type=str, help='Path to Prokka FFN file')
-    parser.add_argument('--prokka_faa', type=str, help='Path to Prokka FAA file')
-    parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], help='Device to run the predictor on')
     parser.add_argument('--output', type=str, help='Filepath for csv output file')
     args = parser.parse_args()
-    out_df = run_defense_predictor(ncbi_feature_table=args.ncbi_feature_table, 
-                          ncbi_cds_from_genomic=args.ncbi_cds_from_genomic, 
-                          ncbi_protein_fasta=args.ncbi_protein_fasta, 
-                          prokka_gff=args.prokka_gff, 
-                          prokka_ffn=args.prokka_ffn, 
-                          prokka_faa=args.prokka_faa, 
-                          device=args.device)
+    out_df, model_feature_df = defense_predictor(ft_file=args.ncbi_feature_table, 
+                                                 fna_file=args.ncbi_cds_from_genomic, 
+                                                 faa_file=args.ncbi_protein_fasta)
     if args.output is None:
-        output = 'defense_predictions' + datetime.now().strftime('%Y%m%d%H%M%S') + '.csv'
+        output = f"defense_predictions_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
     else:
         output = args.output
     out_df.to_csv(output, index=False)

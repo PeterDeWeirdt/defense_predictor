@@ -27,9 +27,9 @@ import defense_predictor as dfp
 ncbi_feature_table = 'GCF_003333385.1_ASM333338v1_feature_table.txt'
 ncbi_cds_from_genomic = 'GCF_003333385.1_ASM333338v1_cds_from_genomic.fna'
 ncbi_protein_fasta = 'GCF_003333385.1_ASM333338v1_protein.faa'
-output_df = dfp.run_defense_predictor(ncbi_feature_table=ncbi_feature_table,
-                                      ncbi_cds_from_genomic=ncbi_cds_from_genomic,
-                                      ncbi_protein_fasta=ncbi_protein_fasta)
+output_df = dfp.defense_predictor(ft_file=ncbi_feature_table,  
+                                  fna_file=ncbi_cds_from_genomic,
+                                  faa_file=ncbi_protein_fasta)
 output_df.head()                                    
 ```
 
@@ -45,7 +45,7 @@ defense_predictor \
 
 <br>
 
-`defense_predictor` outputs the predicted probability and log-odds of defense for each input protein. We reccomend using a stringent log-odds cutoff of `7.2` to call a protein predicted defensive.
+`defense_predictor` outputs the predicted log-odds of defense for each input protein in the columns `mean_log_odds`. We reccomend using a stringent log-odds cutoff of `4` to call a protein predicted defensive.
 
 To see an example you can run the `defense_predictor_example.ipynb` in colab: <a href="https://colab.research.google.com/github/PeterDeWeirdt/defense_predictor/blob/main/defense_predictor_example.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> 
 
@@ -54,5 +54,3 @@ We reccomend running `defense_predictor` on a computer with a cuda-enabled GPU, 
 ### Inputs
 
 Input files can be downloaded from the [ftp webpage](https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/) for any gemone of interest, which is linked on its [assembly page](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000005845.2/). Input files can be generated from an unannotated nuceotide assembly using NCBI's [Prokaryotic Genome Annotation Pipeline](https://github.com/ncbi/pgap). 
-
-Alternatively, `defense_predictor` accepts inputs generated from [prokka](https://github.com/tseemann/prokka) using the arguments `prokka_gff`, `prokka_ffn`, and `prokka_faa`.
