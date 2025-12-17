@@ -1,33 +1,41 @@
 import requests
 import shutil
 import os
-import gzip
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
+def download_url(url, out_path):
+    retry_strategy = Retry(total=5,
+                           backoff_factor=1,
+                           status_forcelist=[429, 500, 502, 503, 504],
+                           allowed_methods=["HEAD", "GET", "OPTIONS"])
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    with session.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(out_path, 'wb') as f:
+            shutil.copyfileobj(r.raw, f)
+    
+    
 def download_file_weights(file, url):
     out_path = os.path.join(os.path.dirname(__file__), file)
     try:
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(out_path, 'wb') as f:
-                shutil.copyfileobj(r.raw, f)
+        download_url(url, out_path)
     except:
-        print(f"Could not download {file}, you can try manually downloading {file} from {url} and placing it in this directory {out_path}")
+        print(f"Could not download {file}, you can try manually downloading {file} from {url} and placing it here: {out_path}")
 
 
 def download_esm2_weights():
     try:
         url = 'https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t30_150M_UR50D.pt'
-        path = os.path.join(os.path.dirname(__file__), 'esm2_t30_150M_UR50D.pt')
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(path, 'wb') as f:
-                shutil.copyfileobj(r.raw, f)
+        out_path = os.path.join(os.path.dirname(__file__), 'esm2_t30_150M_UR50D.pt')
+        download_url(url, out_path)
     except:
         file = 'esm2_t30_150M_UR50D.pt'
-        url = 'https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t30_150M_UR50D.pt'
-        out_path = os.path.dirname(__file__)
-        print(f"Could not download {file}, you can try manually downloading {file} from {url} and placing it in this directory {out_path}")
+        print(f"Could not download {file}, you can try manually downloading {file} from {url} and placing it here: {out_path}")
             
 
 def download_weights():
