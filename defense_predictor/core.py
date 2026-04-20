@@ -8,9 +8,12 @@ import os
 import numpy as np
 import argparse
 import datetime
+import tempfile
 from importlib import resources
 from pathlib import Path
 import warnings
+
+from . import pgap as _pgap
 
 
 def get_feature_df(ft_file):
@@ -88,13 +91,26 @@ def get_representations(faa_file):
     return rep_df
 
 
-def get_motifs(fna_file):
+def _compute_motif_features(seq_df):
     nts = ['A', 'C', 'T', 'G']
-    di_nts = []
-    for n1 in nts:
-        for n2 in nts:
-            di_nts.append(n1 + n2)
+    di_nts = [n1 + n2 for n1 in nts for n2 in nts]
     motifs = nts + di_nts
+    out = seq_df[['protein_context_id', 'seq']].copy()
+    out['gc_frac'] = out['seq'].str.count('G|C') / out['seq'].str.len()
+    out['scaled_gc_frac'] = (out['gc_frac'] - out['gc_frac'].mean()) / out['gc_frac'].std()
+    out_cols = ['protein_context_id', 'scaled_gc_frac']
+    for motif in motifs:
+        col = motif + '_frac'
+        out[col] = out['seq'].str.count(motif) / out['seq'].str.len()
+    for motif in motifs:
+        col = 'scaled_' + motif + '_frac'
+        unscaled_col = motif + '_frac'
+        out[col] = (out[unscaled_col] - out[unscaled_col].mean()) / out[unscaled_col].std()
+        out_cols.append(col)
+    return out[out_cols]
+
+
+def get_motifs(fna_file):
     seq = ''
     seq_list = []
     seq_info = dict()
@@ -120,35 +136,16 @@ def get_motifs(fna_file):
         filtered_seq_df = seq_df[seq_df['pseudo'].isna()].copy()
     else:
         filtered_seq_df = seq_df
-    filtered_seq_df['strand'] = ['-' if x else '+' for x in 
+    filtered_seq_df['strand'] = ['-' if x else '+' for x in
                                  filtered_seq_df['location'].str.contains('complement')]
     filtered_seq_df['start'] = (filtered_seq_df['location']
                                 .str.extract('([0-9]+)\.\.').astype(int))
     filtered_seq_df['genomic_locus'] = filtered_seq_df['id'].str.extract('lcl\|(.+)_cds')
-    filtered_seq_df['protein_context_id'] = (filtered_seq_df['protein_id'] + '|' + 
+    filtered_seq_df['protein_context_id'] = (filtered_seq_df['protein_id'] + '|' +
                                            filtered_seq_df['genomic_locus'] + '|' +
                                            filtered_seq_df['start'].astype(str) + '|' +
                                            filtered_seq_df['strand'])
-    filtered_seq_df = filtered_seq_df.drop(columns=['strand', 'start', 'genomic_locus', 'protein_id'])
-    filtered_seq_df['gc_frac'] = (filtered_seq_df['seq'].str.count('G|C')/
-                                  filtered_seq_df['seq'].str.len())
-    filtered_seq_df['scaled_gc_frac'] = ((filtered_seq_df['gc_frac'] - 
-                                          filtered_seq_df['gc_frac'].mean())/
-                                         filtered_seq_df['gc_frac'].std())
-    out_cols = ['protein_context_id', 'scaled_gc_frac']
-    for motif in motifs:
-        col = motif + '_frac'
-        filtered_seq_df[col] = (filtered_seq_df['seq'].str.count(motif)/
-                                filtered_seq_df['seq'].str.len())
-    for motif in motifs:
-        col = 'scaled_' + motif + '_frac'
-        unscaled_col = motif + '_frac'
-        filtered_seq_df[col] = ((filtered_seq_df[unscaled_col] - 
-                                 filtered_seq_df[unscaled_col].mean())/
-                                filtered_seq_df[unscaled_col].std())
-        out_cols.append(col)
-    filtered_seq_df = filtered_seq_df[out_cols]
-    return filtered_seq_df
+    return _compute_motif_features(filtered_seq_df[['protein_context_id', 'seq']])
 
 
 def parse_fasta(fasta_file):
@@ -255,22 +252,44 @@ def load_model(model_f):
         return load(f)
     
     
-def defense_predictor(ft_file, fna_file, faa_file, rep_df=None, model_feature_df=None):
-    model_fs = ['beaker_fold_0.pkl', 'beaker_fold_1.pkl', 'beaker_fold_2.pkl', 
+def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
+                      rep_df=None, model_feature_df=None):
+    ncbi_args = (ft_file, fna_file, faa_file)
+    ncbi_any = any(x is not None for x in ncbi_args)
+    ncbi_all = all(x is not None for x in ncbi_args)
+    if pgap_gff is not None and ncbi_any:
+        raise ValueError('Provide either pgap_gff or the three NCBI inputs, not both.')
+    if pgap_gff is None and not ncbi_all:
+        raise ValueError('Must provide either pgap_gff or all three NCBI inputs '
+                         '(ft_file, fna_file, faa_file).')
+    model_fs = ['beaker_fold_0.pkl', 'beaker_fold_1.pkl', 'beaker_fold_2.pkl',
                 'beaker_fold_3.pkl', 'beaker_fold_4.pkl']
     for f in model_fs + ['esm2_t30_150M_UR50D.pt', 'esm2_t30_150M_UR50D-contact-regression.pt']:
         if not Path(__file__).parent.joinpath(f).exists():
             raise FileNotFoundError(f)
-    feature_df = get_feature_df(ft_file)
+
+    tmpdir_ctx = tempfile.TemporaryDirectory() if pgap_gff is not None else None
+    try:
+        if pgap_gff is not None:
+            feature_df, cds_seq_df, len_df, faa_path = _pgap.prepare_pgap_inputs(
+                pgap_gff, tmpdir_ctx.name)
+        else:
+            feature_df = get_feature_df(ft_file)
+            cds_seq_df = None
+            len_df = None
+            faa_path = faa_file
+        if model_feature_df is None:
+            print('Getting neighbors')
+            neighbor_df = get_neighbor_df(feature_df)
+            if rep_df is None:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    print('Getting representations')
+                    rep_df = get_representations(faa_path)
+    finally:
+        if tmpdir_ctx is not None:
+            tmpdir_ctx.cleanup()
     if model_feature_df is None:
-        print('Getting neighbors')
-        neighbor_df = get_neighbor_df(feature_df)
-        # Rep df
-        if rep_df is None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                print('Getting representations')
-                rep_df = get_representations(faa_file)
         wide_rep_df = (neighbor_df[['product_accession', 'center_id', 'relative_position']]
                        .set_index('product_accession')
                        .merge(rep_df, how='left', left_index=True, right_index=True)
@@ -278,7 +297,10 @@ def defense_predictor(ft_file, fna_file, faa_file, rep_df=None, model_feature_df
         wide_rep_df = wide_rep_df.fillna(0)
         wide_rep_df.columns = [x[0] + '_' + str(x[1]) for x in wide_rep_df.columns]
         # NT df
-        nt_df = get_motifs(fna_file)
+        if pgap_gff is not None:
+            nt_df = _compute_motif_features(cds_seq_df[['protein_context_id', 'seq']])
+        else:
+            nt_df = get_motifs(fna_file)
         wide_nt_df = (neighbor_df[['protein_context_id', 'center_id', 'relative_position']]
                       .merge(nt_df, how='left', on='protein_context_id')
                       .drop(columns='protein_context_id')
@@ -286,7 +308,8 @@ def defense_predictor(ft_file, fna_file, faa_file, rep_df=None, model_feature_df
         wide_nt_df = wide_nt_df.fillna(1.1)
         wide_nt_df.columns = [x[0] + '_' + str(x[1]) for x in wide_nt_df.columns]
         # Len df
-        len_df = get_seq_len(faa_file)
+        if len_df is None:
+            len_df = get_seq_len(faa_file)
         wide_len_df = (neighbor_df[['product_accession', 'center_id', 'relative_position']]
                        .merge(len_df, how='left', on='product_accession')
                        .drop(columns='product_accession')
@@ -335,11 +358,15 @@ def main():
     parser.add_argument('--ncbi_feature_table', type=str, help='Path to NCBI feature table')
     parser.add_argument('--ncbi_cds_from_genomic', type=str, help='Path to NCBI CDS from genomic file')
     parser.add_argument('--ncbi_protein_fasta', type=str, help='Path to NCBI protein FASTA file')
+    parser.add_argument('--pgap_gff', type=str,
+                        help='Path to a PGAP GFF3 file with embedded ##FASTA section '
+                             '(alternative to the three --ncbi_* inputs)')
     parser.add_argument('--output', type=str, help='Filepath for csv output file')
     args = parser.parse_args()
-    out_df, model_feature_df = defense_predictor(ft_file=args.ncbi_feature_table, 
-                                                 fna_file=args.ncbi_cds_from_genomic, 
-                                                 faa_file=args.ncbi_protein_fasta)
+    out_df, model_feature_df = defense_predictor(ft_file=args.ncbi_feature_table,
+                                                 fna_file=args.ncbi_cds_from_genomic,
+                                                 faa_file=args.ncbi_protein_fasta,
+                                                 pgap_gff=args.pgap_gff)
     if args.output is None:
         output = f"defense_predictions_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
     else:
