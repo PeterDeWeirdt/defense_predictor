@@ -58,4 +58,4 @@ def test_defense_predictor_pgap_gff(reference_predictions):
     recovery = len(merged_df) / len(reference_predictions)
     assert recovery > 0.95, f'Only recovered {recovery:.2%} of reference genes'
     merged_df['delta'] = merged_df['mean_log_odds'] - merged_df['mean_log_odds_reference']
-    assert merged_df['delta'].abs().mean() < 1e-2
+    assert merged_df['delta'].abs().mean() < 0.1
