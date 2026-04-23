@@ -7,7 +7,7 @@ from joblib import load
 import os
 import numpy as np
 import argparse
-import datetime
+from datetime import datetime
 import tempfile
 from importlib import resources
 from pathlib import Path
@@ -116,14 +116,14 @@ def get_motifs(fna_file):
     seq_info = dict()
     for line in open(fna_file):
         line = line.strip()
-        if '>' in line:
+        if line.startswith('>'):
             if seq:
                 seq_info['seq'] = seq
                 seq_list.append(seq_info)
                 seq_info = dict()
                 seq = ''
             seq_info['id'] = line.split(' ')[0][1:]
-            regex = '\[([^=]+)=([^=]+)\]'
+            regex = r'\[([^=]+)=([^=]+)\]'
             attributes = re.findall(regex, line)
             for key, value in attributes:
                 seq_info[key] = value
@@ -139,8 +139,8 @@ def get_motifs(fna_file):
     filtered_seq_df['strand'] = ['-' if x else '+' for x in
                                  filtered_seq_df['location'].str.contains('complement')]
     filtered_seq_df['start'] = (filtered_seq_df['location']
-                                .str.extract('([0-9]+)\.\.').astype(int))
-    filtered_seq_df['genomic_locus'] = filtered_seq_df['id'].str.extract('lcl\|(.+)_cds')
+                                .str.extract(r'([0-9]+)\.\.').astype(int))
+    filtered_seq_df['genomic_locus'] = filtered_seq_df['id'].str.extract(r'lcl\|(.+)_cds')
     filtered_seq_df['protein_context_id'] = (filtered_seq_df['protein_id'] + '|' +
                                            filtered_seq_df['genomic_locus'] + '|' +
                                            filtered_seq_df['start'].astype(str) + '|' +
@@ -161,35 +161,28 @@ def parse_fasta(fasta_file):
     records = []
     current_id = None
     current_sequence_parts = []
-    try:
-        with open(fasta_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue  # Skip empty lines
-                if line.startswith('>'):
-                    # If we have a previous sequence, save it
-                    if current_id is not None:
-                        sequence = "".join(current_sequence_parts)
-                        records.append({'id': current_id, 'sequence': sequence})
-                    # Start a new record
-                    # The ID is the string after '>' and before the first space
-                    current_id = line[1:].split()[0]
-                    current_sequence_parts = []
-                else:
-                    # Append sequence line to the current record
-                    if current_id is not None:
-                        current_sequence_parts.append(line)
-            # After the loop, save the very last record in the file
-            if current_id is not None:
-                sequence = "".join(current_sequence_parts)
-                records.append({'id': current_id, 'sequence': sequence})
-    except FileNotFoundError:
-        print(f"Error: The file '{fasta_file}' was not found.")
-        return [] # Return an empty list on error
-    except Exception as e:
-        print(f"An error occurred while parsing the file: {e}")
-        return []
+    with open(fasta_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue  # Skip empty lines
+            if line.startswith('>'):
+                # If we have a previous sequence, save it
+                if current_id is not None:
+                    sequence = "".join(current_sequence_parts)
+                    records.append({'id': current_id, 'sequence': sequence})
+                # Start a new record
+                # The ID is the string after '>' and before the first space
+                current_id = line[1:].split()[0]
+                current_sequence_parts = []
+            else:
+                # Append sequence line to the current record
+                if current_id is not None:
+                    current_sequence_parts.append(line)
+        # After the loop, save the very last record in the file
+        if current_id is not None:
+            sequence = "".join(current_sequence_parts)
+            records.append({'id': current_id, 'sequence': sequence})
     records_df = pd.DataFrame(records)
     return records_df
 
