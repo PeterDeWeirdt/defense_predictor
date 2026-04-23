@@ -28,10 +28,31 @@ _COMPLEMENT = str.maketrans('ACGTNacgtn', 'TGCANtgcan')
 
 
 def reverse_complement(dna):
+    """Return the reverse-complement of a DNA string.
+
+    Args:
+        dna: a DNA sequence string (upper- or lowercase).
+
+    Returns:
+        The reverse-complement of `dna` with case preserved.
+    """
     return dna.translate(_COMPLEMENT)[::-1]
 
 
 def translate_cds(dna):
+    """Translate a CDS nucleotide sequence to a protein using bacterial code 11.
+
+    Stops at the first in-frame stop codon. The first residue is forced to
+    "M" regardless of the actual start codon.
+    Unknown codons translate to "X".
+
+    Args:
+        dna: a CDS nucleotide sequence starting at a start codon.
+
+    Returns:
+        The translated protein sequence as an uppercase string (without a
+        trailing stop character).
+    """
     dna = dna.upper()
     protein = []
     for i in range(0, len(dna) - 2, 3):
@@ -57,15 +78,25 @@ def _parse_attributes(attrs_str):
 
 
 def parse_pgap_gff(gff_file):
-    """Parse a PGAP GFF3 file with embedded genomic FASTA.
+    """Parse a PGAP GFF3 file with a "##FASTA" section.
+
+    Skips pseudogenes and merges CDS lines that share an
+    "ID" (programmed frameshifts) into one record.
+
+    Args:
+        gff_file: path to a PGAP "annot_with_genomic_fasta.gff".
 
     Returns:
-        cds_records: list of dicts (one per unique CDS ID), with keys
-            id, locus_tag, seqid, strand, product, protein_id, exception,
-            segments (list of (start, end) tuples), start (min), end (max).
-            CDS lines sharing an ID (programmed frameshifts) are merged.
-            Pseudogenes (pseudo=true) are skipped.
-        contig_seqs: dict mapping contig_id -> genomic sequence string.
+        Tuple `(cds_records, contig_seqs)`.
+
+        `cds_records` is a list of dicts (one per unique CDS ID) with keys
+        "id", "locus_tag", "seqid", "strand", "product",
+        "protein_id", "exception", "segments" (list of "(start, end)"
+        tuples), "start" (min across segments), and "end" (max across
+        segments).
+
+        `contig_seqs` is a dict mapping each contig ID
+        to its genomic sequence string.
     """
     cds_by_id = {}
     id_order = []
@@ -134,7 +165,19 @@ def parse_pgap_gff(gff_file):
 
 
 def build_feature_df(cds_records):
-    """Build a feature DataFrame matching the schema expected by the downstream pipeline."""
+    """Build an NCBI-feature-table-shaped DataFrame from parsed PGAP CDS records.
+
+    Uses each CDS's "locus_tag" as the "product_accession". Rows are
+    sorted by "genomic_accession", "start"
+
+    Args:
+        cds_records: list of CDS record dicts.
+
+    Returns:
+        DataFrame with columns "# feature", "product_accession",
+        "genomic_accession", "start", "end", "strand", "attributes",
+        and "protein_context_id".
+    """
     rows = []
     for rec in cds_records:
         rows.append({
@@ -157,9 +200,14 @@ def build_feature_df(cds_records):
 def build_cds_seq_df(cds_records, contig_seqs):
     """Extract CDS nucleotide sequences from the embedded genomic FASTA.
 
-    For plus-strand CDS, segments are concatenated in ascending-start order.
-    For minus-strand CDS, each segment is reverse-complemented and segments
-    are concatenated in descending-start (mRNA) order.
+    Args:
+        cds_records: list of CDS record dicts from :func:`parse_pgap_gff`.
+        contig_seqs: contig-ID -> genomic sequence dict from
+            :func:`parse_pgap_gff`.
+
+    Returns:
+        DataFrame with columns "protein_context_id", "locus_tag", and
+        "seq".
     """
     rows = []
     for rec in cds_records:
@@ -187,13 +235,26 @@ def build_cds_seq_df(cds_records, contig_seqs):
 
 
 def prepare_pgap_inputs(gff_file, workdir):
-    """Parse a PGAP GFF and produce the artifacts needed by defense_predictor.
+    """Parse a PGAP GFF and produce the inputs required by `defense_predictor`.
+
+    Translates each CDS to protein (bacterial code 11) and writes a protein
+    FASTA into `workdir` for ESM2 to consume.
+
+    Args:
+        gff_file: path to a PGAP "annot_with_genomic_fasta.gff".
+        workdir: directory (already created) to hold the temporary protein
+            FASTA.
 
     Returns:
-        feature_df: feature table DataFrame (same schema as get_feature_df output)
-        cds_seq_df: DataFrame with protein_context_id, locus_tag, seq (CDS nt)
-        len_df: DataFrame with product_accession, len (protein aa length)
-        faa_path: path to the written protein FASTA (lives in workdir)
+        Tuple `(feature_df, cds_seq_df, len_df, faa_path)`:
+
+        - `feature_df`: same schema as
+          :func:`defense_predictor.core.get_feature_df` output.
+        - `cds_seq_df`: DataFrame with "protein_context_id",
+          "locus_tag", "seq".
+        - `len_df`: DataFrame with "product_accession" and "len".
+        - `faa_path`: string path to the written protein FASTA inside
+          `workdir`.
     """
     cds_records, contig_seqs = parse_pgap_gff(gff_file)
     feature_df = build_feature_df(cds_records)
