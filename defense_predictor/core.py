@@ -17,6 +17,20 @@ from . import pgap as _pgap
 
 
 def get_feature_df(ft_file):
+    """Read an NCBI feature table and return a filtered dataframe with one new column:
+    "protein_context_id".
+
+    Filters out pseudogenes and rows that are not CDS, then builds a
+    "protein_context_id" column of the form
+    `product_accession|genomic_accession|start|strand`.
+
+    Args:
+        ft_file: path to an NCBI "*_feature_table.txt" file.
+
+    Returns:
+        DataFrame of CDS rows with all original feature-table columns plus a
+        "protein_context_id" column.
+    """
     feature_df = pd.read_table(ft_file)
     feature_df['attributes'] = feature_df['attributes'].astype(str)
     filtered_feature_df = (feature_df[(feature_df['# feature'] == 'CDS') &
@@ -30,6 +44,21 @@ def get_feature_df(ft_file):
 
 
 def get_neighbor_df(feature_df):
+    """Get neighbors +/-2 genes away from each CDS on the same-contig.
+
+    Relative positions are flipped on minus-strand genes so ``-1`` is always the
+    upstream (5') neighbor.
+
+    Args:
+        feature_df: DataFrame that contains "protein_context_id",
+            "product_accession", "genomic_accession", "strand", "start",
+            "end", sorted by "genomic_accession" and "start".
+
+    Returns:
+        Long-format DataFrame with columns "center_id", "center_strand",
+        "relative_position" (-2..+2), "protein_context_id",
+        "product_accession", "strand", "start", "end".
+    """
     n_neighbors = 2
     protein_neighbor_list = list()
     for i, center_row in tqdm(feature_df.iterrows(),
@@ -53,6 +82,19 @@ def get_neighbor_df(feature_df):
 
 
 def get_representations(faa_file):
+    """Compute mean-pooled ESM2 embeddings for every protein in a FASTA file.
+
+    Loads "esm2_t30_150M_UR50D", runs a forward pass, and
+    averages the final layer (30) token representations across each sequence (truncated to
+    1022 residues). Uses CUDA when available.
+
+    Args:
+        faa_file: path to a protein FASTA file.
+
+    Returns:
+        DataFrame of shape "(n_proteins, 640)" with columns "ft1".."ft640"
+        and index values equal to each record's FASTA ID.
+    """
     model_location = 'esm2_t30_150M_UR50D.pt'
     model_path = str(Path(__file__).parent / model_location)
     toks_per_batch = 4096
@@ -92,6 +134,22 @@ def get_representations(faa_file):
 
 
 def _compute_motif_features(seq_df):
+    """Compute z-scored GC and mono/di-nucleotide content.
+
+    For each nucleotide sequence, computes the fraction of G+C, the fraction of each
+    of the 4 nucleotides, and the fraction of each of the 16 dinucleotides,
+    then z-scores each feature across the full set of input sequences, corresponding
+    to all sequences for a genome.
+
+    Args:
+        seq_df: DataFrame with at least "protein_context_id" and "seq"
+            (uppercase nucleotide string) columns.
+
+    Returns:
+        DataFrame with "protein_context_id" plus one "scaled_<motif>_frac"
+        column per motif ("scaled_gc_frac", "scaled_A_frac", ...,
+        "scaled_GG_frac").
+    """
     nts = ['A', 'C', 'T', 'G']
     di_nts = [n1 + n2 for n1 in nts for n2 in nts]
     motifs = nts + di_nts
@@ -111,6 +169,19 @@ def _compute_motif_features(seq_df):
 
 
 def get_motifs(fna_file):
+    """Parse an NCBI CDS-from-genomic FASTA and compute nucleotide features.
+
+    Extracts per-record bracketed attributes (e.g. "[protein_id=...]",
+    "[location=...]"), drops pseudogenes, builds a "protein_context_id" for
+    each CDS.
+
+    Args:
+        fna_file: path to an NCBI "*_cds_from_genomic.fna" file.
+
+    Returns:
+        DataFrame with "protein_context_id" plus the z-scored GC and
+        mono/di-nucleotide content.
+    """
     seq = ''
     seq_list = []
     seq_info = dict()
@@ -149,14 +220,13 @@ def get_motifs(fna_file):
 
 
 def parse_fasta(fasta_file):
-    """
-    Parses a FASTA file using only base Python and returns a list of dictionaries.
+    """Parse a FASTA file into a DataFrame of "id"/"sequence" rows.
+
     Args:
-        fasta_file (str): The path to the FASTA file.
+        fasta_file: path to a FASTA file.
+
     Returns:
-        list: A list of dictionaries, where each dictionary represents a
-              sequence record with 'id' and 'sequence' keys. Returns an
-              empty list if the file is not found or is empty.
+        DataFrame with columns "id" and "sequence".
     """
     records = []
     current_id = None
@@ -188,6 +258,14 @@ def parse_fasta(fasta_file):
 
 
 def get_seq_len(fasta_file):
+    """Return the sequence length of every record in a FASTA file.
+
+    Args:
+        fasta_file: path to a FASTA file.
+
+    Returns:
+        DataFrame with columns "product_accession" and "len".
+    """
     seq_df = parse_fasta(fasta_file)
     seq_df['len'] = seq_df['sequence'].str.len()
     seq_df = (seq_df.rename(columns={'id': 'product_accession'})
@@ -197,6 +275,15 @@ def get_seq_len(fasta_file):
 
 
 def get_directionality(neighbor_df):
+    """Indicate whether each neighbor has the same orientation as its center gene.
+
+    Args:
+        neighbor_df: long-format neighbor DataFrame 
+            with the columns "strand" and "center_strand".
+
+    Returns:
+        DataFrame with columns "protein_context_id", "center_id", and "co_directional".
+    """
     out_df = neighbor_df.copy()
     out_df['co_directional'] = (out_df['strand'] == out_df['center_strand']).astype(int)
     out_df = out_df[['protein_context_id', 'center_id', 'co_directional']]
@@ -204,6 +291,19 @@ def get_directionality(neighbor_df):
 
 
 def get_gene_dist(center_seq_id, context_df):
+    """Compute inter-gene distances within one center gene's window.
+
+    Compute the gap between consecutive genes as 'next.start - curr.end'.
+
+    Args:
+        center_seq_id: the center gene's "protein_context_id".
+        context_df: dataframe with columns "relative_position", "strand", 
+            "start", "end"
+
+    Returns:
+        Dict with "center_id" and one "dist_<a>:<b>" key per adjacent pair
+        of relative positions (e.g. "dist_-2:-1", "dist_-1:0", ...).
+    """
     center_strand = context_df.loc[(context_df['relative_position'] == 0), 'strand'].item()
     if center_strand == '+':
         context_df = context_df.sort_values('relative_position', ascending=True)
@@ -232,7 +332,16 @@ def get_gene_dist(center_seq_id, context_df):
 
 
 def get_distances(neighbor_df):
-    distance_list = [get_gene_dist(center_seq_id, context_df) 
+    """Compute inter-gene distances for every center gene in a neighbor table.
+
+    Args:
+        neighbor_df: long-format neighbor DataFrame
+        
+    Returns:
+        DataFrame indexed by "center_id", with one "dist_<a>:<b>" column
+        per adjacent pair of genes.
+    """
+    distance_list = [get_gene_dist(center_seq_id, context_df)
                      for center_seq_id, context_df in tqdm(neighbor_df.groupby('center_id'),
                                                            position=0)]
     distance_df = pd.DataFrame(distance_list)
@@ -241,12 +350,53 @@ def get_distances(neighbor_df):
 
 
 def load_model(model_f):
+    """Load a pickled LightGBM model.
+
+    Args:
+        model_f: filename.
+
+    Returns:
+        The unpickled model object.
+    """
     with resources.files('defense_predictor').joinpath(model_f).open('rb') as f:
         return load(f)
     
     
 def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
                       rep_df=None, model_feature_df=None):
+    """Run the DefensePredictor pipeline end-to-end on a genome.
+
+    Accepts either the three NCBI input files or a single PGAP GFF3 with
+    embedded genomic FASTA (exactly one of the two input modes must be
+    provided). Builds the feature matrix (ESM2 protein embeddings, nucleotide
+    motif composition, protein length, neighbor co-directionality, and
+    inter-gene distances), then averages log-odds predictions from a 5-fold
+    LightGBM ensemble.
+
+    Args:
+        ft_file: path to an NCBI "*_feature_table.txt". NCBI mode.
+        fna_file: path to an NCBI "*_cds_from_genomic.fna". NCBI mode.
+        faa_file: path to an NCBI "*_protein.faa". NCBI mode.
+        pgap_gff: path to a PGAP "annot_with_genomic_fasta.gff" file. PGAP
+            mode. Mutually exclusive with the three NCBI args.
+        rep_df: optional precomputed ESM2 embedding DataFrame. 
+            If provided, the ESM2 forward pass is skipped.
+        model_feature_df: optional precomputed full feature matrix. If
+            provided, all feature-extraction steps are skipped and the
+            ensemble is run directly on this matrix.
+
+    Returns:
+        Tuple `(out_df, model_feature_df)` where `out_df` is a DataFrame
+        with one row per gene containing "protein_context_id",
+        "mean_log_odds", "sd_log_odds", "min_log_odds",
+        "max_log_odds", and all feature-table columns; and
+        "model_feature_df" is the full feature matrix used for prediction
+        (indexed by "center_id").
+
+    Raises:
+        ValueError: if neither input mode (or both) is provided.
+        FileNotFoundError: if any of the model weights are missing.
+    """
     ncbi_args = (ft_file, fna_file, faa_file)
     ncbi_any = any(x is not None for x in ncbi_args)
     ncbi_all = all(x is not None for x in ncbi_args)
@@ -347,6 +497,11 @@ def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
     
 
 def main():
+    """CLI entry point for `defense_predictor`.
+
+    Parses command-line arguments, runs `defense_predictor`, and writes
+    the output DataFrame to CSV.
+    """
     parser = argparse.ArgumentParser(description='Run defense predictor')
     parser.add_argument('--ncbi_feature_table', type=str, help='Path to NCBI feature table')
     parser.add_argument('--ncbi_cds_from_genomic', type=str, help='Path to NCBI CDS from genomic file')
