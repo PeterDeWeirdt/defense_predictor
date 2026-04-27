@@ -43,19 +43,19 @@ defense_predictor \
      --output GCF_003333385_defense_predictor_output.csv
 ```
 
-Alternatively, `defense_predictor` can take a single [PGAP](https://github.com/ncbi/pgap) GFF3 file with embedded genomic FASTA (PGAP's `annot_with_genomic_fasta.gff` output):
+Alternatively, `defense_predictor` can take a single [GFF3](https://useast.ensembl.org/info/website/upload/gff3.html?) file with embedded genomic FASTA:
 
 ```python
-output_df, feature_matrix = dfp.defense_predictor(pgap_gff='annot_with_genomic_fasta.gff')
+output_df, feature_matrix = dfp.defense_predictor(gff='annot_with_genomic_fasta.gff')
 ```
 
 ```bash
 defense_predictor \
-     --pgap_gff annot_with_genomic_fasta.gff \
+     --gff annot_with_genomic_fasta.gff \
      --output defense_predictor_output.csv
 ```
 
-When given a PGAP GFF, `defense_predictor` translates proteins from the embedded genomic sequence using the bacterial codon table (`transl_table=11`) and uses each CDS's `locus_tag` as its identifier.
+When given a GFF, `defense_predictor` translates proteins from the embedded genomic sequence using the bacterial codon table (`transl_table=11`) and uses each CDS's `locus_tag` as its identifier.
 
 <br>
 
@@ -69,4 +69,5 @@ We reccomend running `defense_predictor` on a computer with a cuda-enabled GPU, 
 
 The NCBI input files can be downloaded from the [ftp webpage](https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/) for any gemone of interest, which is linked on its [assembly page](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000005845.2/).
 
-For an unannotated nucleotide assembly, run NCBI's [Prokaryotic Genome Annotation Pipeline (PGAP)](https://github.com/ncbi/pgap) and pass its `annot_with_genomic_fasta.gff` output directly via `--pgap_gff`.
+For an unannotated nucleotide assembly, run NCBI's [Prokaryotic Genome Annotation Pipeline (PGAP)](https://github.com/ncbi/pgap) 
+or [prokka](https://github.com/tseemann/prokka) and pass its `*.gff` output directly via `--gff`.

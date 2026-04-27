@@ -43,7 +43,7 @@ def _decompose_protein_context_id(df):
 def test_defense_predictor_pgap_gff(reference_predictions):
     data_top_dir = Path(__file__).parent / 'data'
     pgap_gff = data_top_dir / 'annot_with_genomic_fasta.gff'
-    output_df, _ = defense_predictor(pgap_gff=pgap_gff)
+    output_df, _ = defense_predictor(gff=pgap_gff)
     # PGAP uses locus_tag (pgaptmp_XXXXXX) as the identifier while the NCBI reference uses
     # NP_/WP_ accessions, so join on (genomic_accession, start, strand) instead of
     # protein_context_id. For the vast majority of genes PGAP and RefSeq agree on coordinates.
