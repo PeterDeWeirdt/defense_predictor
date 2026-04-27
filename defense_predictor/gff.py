@@ -77,14 +77,14 @@ def _parse_attributes(attrs_str):
     return out
 
 
-def parse_pgap_gff(gff_file):
-    """Parse a PGAP GFF3 file with a "##FASTA" section.
+def parse_gff(gff_file):
+    """Parse a GFF3 file with a "##FASTA" section.
 
     Skips pseudogenes and merges CDS lines that share an
     "ID" (programmed frameshifts) into one record.
 
     Args:
-        gff_file: path to a PGAP "annot_with_genomic_fasta.gff".
+        gff_file: path to a GFF3 file
 
     Returns:
         Tuple `(cds_records, contig_seqs)`.
@@ -165,7 +165,7 @@ def parse_pgap_gff(gff_file):
 
 
 def build_feature_df(cds_records):
-    """Build an NCBI-feature-table-shaped DataFrame from parsed PGAP CDS records.
+    """Build an NCBI-feature-table-shaped DataFrame from parsed gff CDS records.
 
     Uses each CDS's "locus_tag" as the "product_accession". Rows are
     sorted by "genomic_accession", "start"
@@ -201,9 +201,9 @@ def build_cds_seq_df(cds_records, contig_seqs):
     """Extract CDS nucleotide sequences from the embedded genomic FASTA.
 
     Args:
-        cds_records: list of CDS record dicts from :func:`parse_pgap_gff`.
+        cds_records: list of CDS record dicts from :func:`parse_gff`.
         contig_seqs: contig-ID -> genomic sequence dict from
-            :func:`parse_pgap_gff`.
+            :func:`parse_gff`.
 
     Returns:
         DataFrame with columns "protein_context_id", "locus_tag", and
@@ -234,14 +234,14 @@ def build_cds_seq_df(cds_records, contig_seqs):
     return pd.DataFrame(rows)
 
 
-def prepare_pgap_inputs(gff_file, workdir):
-    """Parse a PGAP GFF and produce the inputs required by `defense_predictor`.
+def prepare_inputs(gff_file, workdir):
+    """Parse a GFF and produce the inputs required by `defense_predictor`.
 
     Translates each CDS to protein (bacterial code 11) and writes a protein
     FASTA into `workdir` for ESM2 to consume.
 
     Args:
-        gff_file: path to a PGAP "annot_with_genomic_fasta.gff".
+        gff_file: path to a GFF3 file
         workdir: directory (already created) to hold the temporary protein
             FASTA.
 
@@ -256,7 +256,7 @@ def prepare_pgap_inputs(gff_file, workdir):
         - `faa_path`: string path to the written protein FASTA inside
           `workdir`.
     """
-    cds_records, contig_seqs = parse_pgap_gff(gff_file)
+    cds_records, contig_seqs = parse_gff(gff_file)
     feature_df = build_feature_df(cds_records)
     cds_seq_df = build_cds_seq_df(cds_records, contig_seqs)
 

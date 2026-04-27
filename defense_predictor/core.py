@@ -13,7 +13,7 @@ from importlib import resources
 from pathlib import Path
 import warnings
 
-from . import pgap as _pgap
+from . import gff as _gff
 
 
 def get_feature_df(ft_file):
@@ -362,11 +362,11 @@ def load_model(model_f):
         return load(f)
     
     
-def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
+def defense_predictor(ft_file=None, fna_file=None, faa_file=None, gff=None,
                       rep_df=None, model_feature_df=None):
     """Run the DefensePredictor pipeline end-to-end on a genome.
 
-    Accepts either the three NCBI input files or a single PGAP GFF3 with
+    Accepts either the three NCBI input files or a single GFF3 with
     embedded genomic FASTA (exactly one of the two input modes must be
     provided). Builds the feature matrix (ESM2 protein embeddings, nucleotide
     motif composition, protein length, neighbor co-directionality, and
@@ -377,8 +377,8 @@ def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
         ft_file: path to an NCBI "*_feature_table.txt". NCBI mode.
         fna_file: path to an NCBI "*_cds_from_genomic.fna". NCBI mode.
         faa_file: path to an NCBI "*_protein.faa". NCBI mode.
-        pgap_gff: path to a PGAP "annot_with_genomic_fasta.gff" file. PGAP
-            mode. Mutually exclusive with the three NCBI args.
+        gff: path to a GFF3 file. 
+            Mutually exclusive with the three NCBI args.
         rep_df: optional precomputed ESM2 embedding DataFrame. 
             If provided, the ESM2 forward pass is skipped.
         model_feature_df: optional precomputed full feature matrix. If
@@ -400,10 +400,10 @@ def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
     ncbi_args = (ft_file, fna_file, faa_file)
     ncbi_any = any(x is not None for x in ncbi_args)
     ncbi_all = all(x is not None for x in ncbi_args)
-    if pgap_gff is not None and ncbi_any:
-        raise ValueError('Provide either pgap_gff or the three NCBI inputs, not both.')
-    if pgap_gff is None and not ncbi_all:
-        raise ValueError('Must provide either pgap_gff or all three NCBI inputs '
+    if gff is not None and ncbi_any:
+        raise ValueError('Provide either gff or the three NCBI inputs, not both.')
+    if gff is None and not ncbi_all:
+        raise ValueError('Must provide either gff or all three NCBI inputs '
                          '(ft_file, fna_file, faa_file).')
     model_fs = ['beaker_fold_0.pkl', 'beaker_fold_1.pkl', 'beaker_fold_2.pkl',
                 'beaker_fold_3.pkl', 'beaker_fold_4.pkl']
@@ -411,11 +411,11 @@ def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
         if not Path(__file__).parent.joinpath(f).exists():
             raise FileNotFoundError(f)
 
-    tmpdir_ctx = tempfile.TemporaryDirectory() if pgap_gff is not None else None
+    tmpdir_ctx = tempfile.TemporaryDirectory() if gff is not None else None
     try:
-        if pgap_gff is not None:
-            feature_df, cds_seq_df, len_df, faa_path = _pgap.prepare_pgap_inputs(
-                pgap_gff, tmpdir_ctx.name)
+        if gff is not None:
+            feature_df, cds_seq_df, len_df, faa_path = _gff.prepare_inputs(
+                gff, tmpdir_ctx.name)
         else:
             feature_df = get_feature_df(ft_file)
             cds_seq_df = None
@@ -440,7 +440,7 @@ def defense_predictor(ft_file=None, fna_file=None, faa_file=None, pgap_gff=None,
         wide_rep_df = wide_rep_df.fillna(0)
         wide_rep_df.columns = [x[0] + '_' + str(x[1]) for x in wide_rep_df.columns]
         # NT df
-        if pgap_gff is not None:
+        if gff is not None:
             nt_df = _compute_motif_features(cds_seq_df[['protein_context_id', 'seq']])
         else:
             nt_df = get_motifs(fna_file)
@@ -506,15 +506,15 @@ def main():
     parser.add_argument('--ncbi_feature_table', type=str, help='Path to NCBI feature table')
     parser.add_argument('--ncbi_cds_from_genomic', type=str, help='Path to NCBI CDS from genomic file')
     parser.add_argument('--ncbi_protein_fasta', type=str, help='Path to NCBI protein FASTA file')
-    parser.add_argument('--pgap_gff', type=str,
-                        help='Path to a PGAP GFF3 file with embedded ##FASTA section '
+    parser.add_argument('--gff', type=str,
+                        help='Path to a GFF3 file with embedded ##FASTA section '
                              '(alternative to the three --ncbi_* inputs)')
     parser.add_argument('--output', type=str, help='Filepath for csv output file')
     args = parser.parse_args()
     out_df, model_feature_df = defense_predictor(ft_file=args.ncbi_feature_table,
                                                  fna_file=args.ncbi_cds_from_genomic,
                                                  faa_file=args.ncbi_protein_fasta,
-                                                 pgap_gff=args.pgap_gff)
+                                                 gff=args.gff)
     if args.output is None:
         output = f"defense_predictions_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
     else:
